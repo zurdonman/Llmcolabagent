@@ -22,6 +22,9 @@ class Config:
     flash_attn: bool = False
     n_batch: int = 0  # 0 = llama-server default
     n_threads: int = 0  # 0 = auto
+    ctx_shift: bool = True  # context shifting / sliding window to avoid OOM
+    defrag_thold: float = -1.0  # -1 = default, 0-1 to enable defrag
+    keep: int = 0  # tokens to keep when shifting (0 = auto)
     # ollama specific
     ollama_host: str = "127.0.0.1:11434"
     # misc
@@ -61,6 +64,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--flash-attn", action="store_true", default=os.getenv("LLM_FLASH_ATTN", "").lower() in ("1","true","yes"))
     p.add_argument("--n-batch", type=int, default=int(os.getenv("LLM_N_BATCH", "0")))
     p.add_argument("--n-threads", type=int, default=int(os.getenv("LLM_N_THREADS", "0")))
+    p.add_argument("--ctx-shift", action="store_true", default=os.getenv("LLM_CTX_SHIFT", "1").lower() in ("1","true","yes"))
+    p.add_argument("--no-ctx-shift", action="store_true", help="Disable context shifting")
+    p.add_argument("--defrag-thold", type=float, default=float(os.getenv("LLM_DEFRAG_THOLD", "-1")))
+    p.add_argument("--keep", type=int, default=int(os.getenv("LLM_KEEP", "0")))
     p.add_argument("--ollama-host", default=os.getenv("OLLAMA_HOST", "127.0.0.1:11434"))
     p.add_argument("--no-ui", action="store_true", help="Do not open browser UI automatically (UI still served)")
     p.add_argument("extra_args", nargs=argparse.REMAINDER, help="Extra args passed to backend server after --")
@@ -86,6 +93,9 @@ def config_from_args(args: argparse.Namespace) -> Config:
         flash_attn=args.flash_attn,
         n_batch=args.n_batch,
         n_threads=args.n_threads,
+        ctx_shift=(args.ctx_shift and not args.no_ctx_shift),
+        defrag_thold=args.defrag_thold,
+        keep=args.keep,
         ollama_host=args.ollama_host,
         extra_args=extra,
     )

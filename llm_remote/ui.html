@@ -86,12 +86,12 @@
       <div class="mb">
         <label>Backend</label>
         <select id="backend" onchange="onBackendChange()">
-          <option value="ollama">Ollama (fácil, gestiona modelos)</option>
-          <option value="llama.cpp">llama.cpp (GGUF, control fino)</option>
+          <option value="llama.cpp" selected>llama.cpp (GGUF, control fino, recomendado)</option>
+          <option value="ollama">Ollama (gestiona modelos)</option>
         </select>
       </div>
 
-      <div id="ollamaSection">
+      <div id="ollamaSection" style="display:none">
         <div class="flex mb">
           <div class="grow"><label>Modelos disponibles en Ollama (local)</label></div>
           <button class="btn sm" onclick="loadOllamaModels()">Actualizar</button>
@@ -109,7 +109,14 @@
         <div class="hint">Puedes elegir uno de la lista o escribir uno nuevo y hacer "Pull modelo".</div>
       </div>
 
-      <div id="llamaSection" style="display:none">
+      <div id="llamaSection">
+        <div class="flex mb">
+          <div class="grow"><label>Modelos descargados en Ollama (usar en llama.cpp)</label></div>
+          <button class="btn sm" onclick="loadOllamaGguf()">Actualizar</button>
+        </div>
+        <div class="list mb" id="ollamaGgufList"><div class="item"><div class="s">Pulsa "Actualizar" para detectar modelos GGUF de Ollama.</div></div></div>
+        <div class="hint mb">Esto detecta los blobs GGUF que Ollama ya descargó y te permite cargarlos directamente con llama.cpp (más control, KV quant, etc.).</div>
+        <div class="sep"></div>
         <div class="mb">
           <label>Buscar modelos GGUF en HuggingFace</label>
           <div class="flex">
@@ -183,7 +190,21 @@
           <input type="number" id="nThreads" value="0" min="0" step="1" />
         </div>
       </div>
-      <div class="hint mb">KV cache q8_0/q4_0 reduce uso de memoria en contexto largo (útil en Colab/GPUs pequeñas). Aplica a llama.cpp.</div>
+      <div class="row3 mb">
+        <div>
+          <label>Ventana deslizante (context shift)</label>
+          <select id="ctxShift"><option value="true" selected>Sí (evita OOM por contexto)</option><option value="false">No</option></select>
+        </div>
+        <div>
+          <label>Defrag threshold (-1 default)</label>
+          <input type="number" id="defragThold" value="-1" min="-1" max="1" step="0.1" />
+        </div>
+        <div>
+          <label>Keep tokens (0 auto)</label>
+          <input type="number" id="keepTokens" value="0" min="0" step="16" />
+        </div>
+      </div>
+      <div class="hint mb">KV cache q8_0/q4_0 reduce memoria. Context shift/ventana deslizante permite reutilizar el contexto cuando se llena en vez de fallar por OOM (llama.cpp). Aplica a llama.cpp.</div>
       <div class="flex">
         <button class="btn primary grow" id="startBtn" onclick="startServer()">Cargar / Iniciar modelo</button>
       </div>
@@ -264,6 +285,20 @@ async function loadOllamaModels() {
   } catch(e) { el.innerHTML = `<div class="item"><div class="s">Error: ${e.message}</div></div>`; }
 }
 function selectOllama(name){ document.getElementById('ollamaModel').value = name; }
+async function loadOllamaGguf() {
+  const el = document.getElementById('ollamaGgufList');
+  el.innerHTML = '<div class="item"><div class="s">Buscando modelos GGUF de Ollama...</div></div>';
+  try {
+    const d = await api('/api/ollama/gguf');
+    const models = d.models || [];
+    if (!models.length) { el.innerHTML = '<div class="item"><div class="s">No se encontraron modelos GGUF de Ollama en este sistema.</div></div>'; return; }
+    el.innerHTML = models.map(m => `<div class="item" onclick="selectLlamaModel('${(m.path||'').replace(/\\/g,'\\\\').replace(/'/g, "\'")}')">
+      <div class="t">${m.name||''} <span class="pill">ollama→gguf</span></div>
+      <div class="s">${m.size_gb?m.size_gb+' GB':''} · ${m.path||''}</div>
+    </div>`).join('');
+  } catch(e) { el.innerHTML = `<div class="item"><div class="s">Error: ${e.message}</div></div>`; }
+}
+function selectLlamaModel(path){ document.getElementById('llamaModel').value = path; }
 async function pullOllama() {
   const model = document.getElementById('ollamaModel').value.trim();
   if(!model) return alert('Escribe un modelo Ollama');
@@ -317,6 +352,9 @@ async function startServer() {
     flash_attn: document.getElementById('flashAttn').value === 'true',
     n_batch: parseInt(document.getElementById('nBatch').value||'0'),
     n_threads: parseInt(document.getElementById('nThreads').value||'0'),
+    ctx_shift: document.getElementById('ctxShift').value === 'true',
+    defrag_thold: parseFloat(document.getElementById('defragThold').value||'-1'),
+    keep: parseInt(document.getElementById('keepTokens').value||'0'),
   };
   document.getElementById('startBtn').disabled = true;
   try {
@@ -329,8 +367,8 @@ async function stopServer() {
   await api('/api/server/stop', {method:'POST'});
   await refreshStatus();
 }
-async function refreshAll(){ await refreshStatus(); await loadOllamaModels(); await loadLogs(); }
-refreshStatus(); loadOllamaModels(); loadLogs();
+async function refreshAll(){ await refreshStatus(); await loadOllamaModels(); await loadOllamaGguf(); await loadLogs(); }
+refreshStatus(); loadOllamaModels(); loadOllamaGguf(); loadLogs();
 setInterval(refreshStatus, 3000);
 setInterval(loadLogs, 4000);
 </script>

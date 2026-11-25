@@ -258,6 +258,12 @@ def start_llama_server(cfg, internal_port: int, log_file) -> subprocess.Popen:
         cmd += ["-b", str(cfg.n_batch)]
     if cfg.n_threads and cfg.n_threads > 0:
         cmd += ["-t", str(cfg.n_threads)]
+    if not cfg.ctx_shift:
+        cmd += ["--no-context-shift"]
+    if cfg.defrag_thold >= 0:
+        cmd += ["--defrag-thold", str(cfg.defrag_thold)]
+    if cfg.keep and cfg.keep > 0:
+        cmd += ["--keep", str(cfg.keep)]
 
     cmd += cfg.extra_args
 
@@ -411,3 +417,88 @@ def stop_process(proc: subprocess.Popen | None):
             proc.kill()
         except Exception:
             pass
+
+
+def _ollama_models_dir() -> Path | None:
+    env = os.environ.get("OLLAMA_MODELS")
+    if env:
+        p = Path(env).expanduser()
+        if p.exists():
+            return p
+    candidates = [
+        Path.home() / ".ollama" / "models",
+        Path("/usr/share/ollama/.ollama/models"),
+        Path("/var/lib/ollama/.ollama/models"),
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    return None
+
+
+def list_ollama_gguf_models() -> list[dict]:
+    """Scan Ollama manifests and return models whose model layer is a local GGUF blob."""
+    models_dir = _ollama_models_dir()
+    if not models_dir:
+        return []
+    manifests_dir = models_dir / "manifests"
+    blobs_dir = models_dir / "blobs"
+    if not manifests_dir.exists() or not blobs_dir.exists():
+        return []
+    results = []
+    for manifest_path in manifests_dir.rglob("*"):
+        if not manifest_path.is_file():
+            continue
+        try:
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        layers = data.get("layers", []) if isinstance(data, dict) else []
+        model_digest = None
+        for layer in layers:
+            mt = (layer.get("mediaType") or "").lower()
+            if "model" in mt:
+                model_digest = layer.get("digest")
+                break
+        if not model_digest:
+            continue
+        # digest like sha256:abcdef
+        digest = model_digest.replace(":", "-")
+        blob_path = blobs_dir / digest
+        if not blob_path.exists():
+            # sometimes sha256:...
+            blob_path = blobs_dir / model_digest.replace(":", "-")
+        if not blob_path.exists():
+            continue
+        size = blob_path.stat().st_size
+        # Build model name from manifest path relative to manifests dir
+        try:
+            rel = manifest_path.relative_to(manifests_dir)
+            parts = rel.parts
+            # typical: registry.ollama.ai/library/<name>/<tag> or registry.ollama.ai/<user>/<name>/<tag>
+            if len(parts) >= 4 and parts[0] == "registry.ollama.ai":
+                if parts[1] == "library":
+                    name = f"{parts[2]}:{parts[3]}" if len(parts) > 3 else parts[2]
+                else:
+                    name = f"{parts[1]}/{parts[2]}:{parts[3]}" if len(parts) > 3 else "/".join(parts[1:])
+            else:
+                name = ":".join(parts[-2:]) if len(parts) >= 2 else str(rel)
+        except Exception:
+            name = manifest_path.name
+        results.append({
+            "name": name,
+            "path": str(blob_path),
+            "size": size,
+            "size_gb": round(size / (1024**3), 2),
+            "source": "ollama",
+        })
+    # dedupe by path
+    seen = set()
+    uniq = []
+    for r in results:
+        if r["path"] in seen:
+            continue
+        seen.add(r["path"])
+        uniq.append(r)
+    uniq.sort(key=lambda x: x["name"])
+    return uniq
