@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LLM Remote - Panel</title>
+  <style>
+    :root { --bg:#0b1020; --card:#131a2e; --muted:#8ea0c0; --text:#e8eefc; --accent:#5b8cff; --ok:#2ecc71; --warn:#f5a623; --err:#ff5c7a; --border:#24304f; }
+    *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:linear-gradient(180deg,#0b1020,#0e1530);color:var(--text);}
+    .wrap{max-width:1200px;margin:0 auto;padding:24px;}
+    h1{margin:0 0 4px;font-size:28px} .sub{color:var(--muted);margin-bottom:20px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px} @media(max-width:900px){.grid{grid-template-columns:1fr}}
+    .card{background:rgba(19,26,46,.95);border:1px solid var(--border);border-radius:14px;padding:18px;box-shadow:0 8px 30px rgba(0,0,0,.25)}
+    .card h2{margin:0 0 12px;font-size:16px;color:#cfe0ff}
+    label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+    input,select,button,textarea{font:inherit}
+    input[type=text],input[type=number],input[type=password],select{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:#0c1326;color:var(--text)}
+    input:focus,select:focus{outline:2px solid rgba(91,140,255,.4);border-color:var(--accent)}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px} .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+    .mb{margin-bottom:12px}
+    .btn{padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:#182342;color:var(--text);cursor:pointer}
+    .btn:hover{filter:brightness(1.08)} .btn:disabled{opacity:.5;cursor:not-allowed}
+    .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+    .btn.danger{background:#3a1820;border-color:#6b2635;color:#ffd7de}
+    .btn.sm{padding:7px 10px;font-size:12px}
+    .status{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;font-size:13px;background:#0c1326;border:1px solid var(--border)}
+    .dot{width:10px;height:10px;border-radius:50%;background:var(--muted)} .dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.err{background:var(--err)}
+    .kv{font-size:13px;color:var(--muted)} .kv b{color:var(--text);font-weight:600}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+    .box{background:#0c1326;border:1px solid var(--border);border-radius:10px;padding:10px;overflow:auto}
+    .list{max-height:260px;overflow:auto;border:1px solid var(--border);border-radius:10px;background:#0c1326}
+    .item{padding:10px 12px;border-bottom:1px solid #1b2742;cursor:pointer} .item:last-child{border-bottom:0} .item:hover{background:#162040}
+    .item .t{font-size:13px;font-weight:600} .item .s{font-size:12px;color:var(--muted);margin-top:2px}
+    .pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#182342;color:#bcd0f5;font-size:11px;margin-right:4px}
+    .flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .grow{flex:1}
+    .logs{height:220px;white-space:pre-wrap;font-size:11px;line-height:1.45}
+    .hint{font-size:12px;color:var(--muted);margin-top:6px}
+    .sep{height:1px;background:var(--border);margin:14px 0}
+    a{color:#8fb1ff}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>LLM Remote</h1>
+  <div class="sub">Panel plug-and-play para cargar modelos con Ollama o llama.cpp y exponer una API OpenAI-compatible.</div>
+
+  <div class="card mb">
+    <div class="flex" style="justify-content:space-between">
+      <div class="flex">
+        <span class="status"><span id="dot" class="dot"></span><span id="statusText">Cargando...</span></span>
+        <span class="kv">Modelo: <b id="modelText">-</b></span>
+      </div>
+      <div class="flex">
+        <button class="btn danger sm" id="stopBtn" onclick="stopServer()">Detener modelo</button>
+        <button class="btn sm" onclick="refreshAll()">Refrescar</button>
+      </div>
+    </div>
+    <div class="sep"></div>
+    <div class="row">
+      <div>
+        <label>URL local</label>
+        <div class="box mono" id="localUrl">-</div>
+      </div>
+      <div>
+        <label>URL pública (túnel)</label>
+        <div class="box mono" id="publicUrl">-</div>
+      </div>
+    </div>
+    <div class="row mt" style="margin-top:10px">
+      <div>
+        <label>API Key</label>
+        <div class="box mono" id="apiKey">-</div>
+      </div>
+      <div>
+        <label>Endpoint para agentes (OpenAI-compatible)</label>
+        <div class="box mono" id="endpoint">-</div>
+      </div>
+    </div>
+    <div class="hint">Usa <code>base_url = &lt;URL&gt;/v1</code> y <code>api_key</code> en tu harness/agente.</div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>1) Backend y modelo</h2>
+      <div class="mb">
+        <label>Backend</label>
+        <select id="backend" onchange="onBackendChange()">
+          <option value="ollama">Ollama (fácil, gestiona modelos)</option>
+          <option value="llama.cpp">llama.cpp (GGUF, control fino)</option>
+        </select>
+      </div>
+
+      <div id="ollamaSection">
+        <div class="flex mb">
+          <div class="grow"><label>Modelos disponibles en Ollama (local)</label></div>
+          <button class="btn sm" onclick="loadOllamaModels()">Actualizar</button>
+        </div>
+        <div class="list mb" id="ollamaList"><div class="item"><div class="s">Cargando...</div></div></div>
+        <div class="row mb">
+          <div>
+            <label>Nombre del modelo Ollama</label>
+            <input type="text" id="ollamaModel" placeholder="ej: qwen2.5:1.5b" />
+          </div>
+          <div style="display:flex;align-items:end">
+            <button class="btn" style="width:100%" onclick="pullOllama()">Pull modelo</button>
+          </div>
+        </div>
+        <div class="hint">Puedes elegir uno de la lista o escribir uno nuevo y hacer "Pull modelo".</div>
+      </div>
+
+      <div id="llamaSection" style="display:none">
+        <div class="mb">
+          <label>Buscar modelos GGUF en HuggingFace</label>
+          <div class="flex">
+            <input type="text" id="hfQuery" class="grow" placeholder="ej: llama 3.2 instruct gguf" onkeydown="if(event.key==='Enter')searchHF()" />
+            <button class="btn" onclick="searchHF()">Buscar</button>
+          </div>
+        </div>
+        <div class="list mb" id="hfResults"><div class="item"><div class="s">Busca un modelo en HuggingFace.</div></div></div>
+        <div class="mb">
+          <label>Archivos GGUF del repo seleccionado</label>
+          <div class="list" id="hfFiles"><div class="item"><div class="s">Selecciona un repo para ver sus archivos .gguf.</div></div></div>
+        </div>
+        <div class="mb">
+          <label>Modelo seleccionado (ruta local, URL .gguf o repo HF:archivo.gguf)</label>
+          <input type="text" id="llamaModel" placeholder="ej: bartowski/Llama-3.2-1B-Instruct-GGUF:Llama-3.2-1B-Instruct-Q4_K_M.gguf" />
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>2) Configuración y arranque</h2>
+      <div class="row mb">
+        <div>
+          <label>Contexto (n_ctx)</label>
+          <input type="number" id="nCtx" value="4096" min="256" step="256" />
+        </div>
+        <div>
+          <label>GPU layers (-1 auto, 0 CPU)</label>
+          <input type="number" id="nGpuLayers" value="-1" step="1" />
+        </div>
+      </div>
+      <div class="row mb">
+        <div>
+          <label>KV cache K (ahorro memoria)</label>
+          <select id="cacheK">
+            <option value="">auto (f16)</option>
+            <option value="f16">f16</option>
+            <option value="q8_0">q8_0 (ahorra RAM)</option>
+            <option value="q4_0">q4_0 (más ahorro)</option>
+            <option value="q4_1">q4_1</option>
+            <option value="iq4_nl">iq4_nl</option>
+            <option value="q5_0">q5_0</option>
+            <option value="q5_1">q5_1</option>
+          </select>
+        </div>
+        <div>
+          <label>KV cache V (ahorro memoria)</label>
+          <select id="cacheV">
+            <option value="">auto (f16)</option>
+            <option value="f16">f16</option>
+            <option value="q8_0">q8_0 (ahorra RAM)</option>
+            <option value="q4_0">q4_0 (más ahorro)</option>
+            <option value="q4_1">q4_1</option>
+            <option value="iq4_nl">iq4_nl</option>
+            <option value="q5_0">q5_0</option>
+            <option value="q5_1">q5_1</option>
+          </select>
+        </div>
+      </div>
+      <div class="row3 mb">
+        <div>
+          <label>Flash Attention</label>
+          <select id="flashAttn"><option value="false">No</option><option value="true">Sí (-fa)</option></select>
+        </div>
+        <div>
+          <label>Batch size (0 auto)</label>
+          <input type="number" id="nBatch" value="0" min="0" step="32" />
+        </div>
+        <div>
+          <label>Threads (0 auto)</label>
+          <input type="number" id="nThreads" value="0" min="0" step="1" />
+        </div>
+      </div>
+      <div class="hint mb">KV cache q8_0/q4_0 reduce uso de memoria en contexto largo (útil en Colab/GPUs pequeñas). Aplica a llama.cpp.</div>
+      <div class="flex">
+        <button class="btn primary grow" id="startBtn" onclick="startServer()">Cargar / Iniciar modelo</button>
+      </div>
+      <div class="sep"></div>
+      <h2>Logs del backend</h2>
+      <div class="box mono logs" id="logs">(sin logs)</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>Uso rápido (OpenAI SDK)</h2>
+    <pre class="box mono" id="codeSample" style="margin:0;white-space:pre-wrap"></pre>
+  </div>
+</div>
+
+<script>
+let state = {};
+async function api(path, opts={}) {
+  const r = await fetch(path, {headers:{'Content-Type':'application/json'}, ...opts});
+  const t = await r.text();
+  let d; try { d = JSON.parse(t); } catch { d = {raw:t}; }
+  if (!r.ok) throw new Error(d.detail || d.error || t);
+  return d;
+}
+function setDot(status) {
+  const dot = document.getElementById('dot');
+  dot.className = 'dot ' + (status==='running'?'ok':status==='starting'?'warn':status==='error'?'err':'');
+}
+function updateCodeSample() {
+  const base = (state.public_url || state.local_url || 'http://127.0.0.1:8000') + '/v1';
+  const key = state.api_key || 'TU_API_KEY';
+  const model = state.model_loaded || state.model || 'modelo';
+  document.getElementById('codeSample').textContent =
+`from openai import OpenAI\n\nclient = OpenAI(\n    base_url="${base}",\n    api_key="${key}",\n)\n\nresp = client.chat.completions.create(\n    model="${model}",\n    messages=[{"role":"user","content":"Hola"}],\n)\nprint(resp.choices[0].message.content)`;
+}
+async function refreshStatus() {
+  try {
+    state = await api('/api/status');
+    setDot(state.status);
+    document.getElementById('statusText').textContent = state.status + (state.status_detail ? ' — ' + state.status_detail : '');
+    document.getElementById('modelText').textContent = state.model_loaded || state.model || '-';
+    document.getElementById('localUrl').textContent = state.local_url || '-';
+    document.getElementById('publicUrl').textContent = state.public_url || '(no disponible)';
+    document.getElementById('apiKey').textContent = state.api_key || '-';
+    const base = (state.public_url || state.local_url || '');
+    document.getElementById('endpoint').textContent = base ? base + '/v1/chat/completions' : '-';
+    if (state.config) {
+      if (document.activeElement.id !== 'nCtx') document.getElementById('nCtx').value = state.config.n_ctx;
+      if (document.activeElement.id !== 'nGpuLayers') document.getElementById('nGpuLayers').value = state.config.n_gpu_layers;
+    }
+    updateCodeSample();
+  } catch(e) { console.error(e); }
+}
+async function loadLogs() {
+  try {
+    const d = await api('/api/logs?tail=120');
+    const el = document.getElementById('logs');
+    el.textContent = (d.lines||[]).join('\n') || '(sin logs)';
+    el.scrollTop = el.scrollHeight;
+  } catch(e) {}
+}
+function onBackendChange() {
+  const b = document.getElementById('backend').value;
+  document.getElementById('ollamaSection').style.display = b==='ollama' ? '' : 'none';
+  document.getElementById('llamaSection').style.display = b==='llama.cpp' ? '' : 'none';
+}
+async function loadOllamaModels() {
+  const el = document.getElementById('ollamaList');
+  el.innerHTML = '<div class="item"><div class="s">Cargando...</div></div>';
+  try {
+    const d = await api('/api/ollama/models');
+    const models = d.models || [];
+    if (!models.length) { el.innerHTML = '<div class="item"><div class="s">No hay modelos locales en Ollama (o Ollama no está corriendo).</div></div>'; return; }
+    el.innerHTML = models.map(m => `<div class="item" onclick="selectOllama('${(m.name||'').replace(/'/g, "\\'")}')">
+      <div class="t">${m.name||''}</div>
+      <div class="s">${m.size_gb?m.size_gb+' GB':''} ${m.details?.parameter_size?'<span class="pill">'+m.details.parameter_size+'</span>':''} ${m.details?.quantization_level?'<span class="pill">'+m.details.quantization_level+'</span>':''}</div>
+    </div>`).join('');
+  } catch(e) { el.innerHTML = `<div class="item"><div class="s">Error: ${e.message}</div></div>`; }
+}
+function selectOllama(name){ document.getElementById('ollamaModel').value = name; }
+async function pullOllama() {
+  const model = document.getElementById('ollamaModel').value.trim();
+  if(!model) return alert('Escribe un modelo Ollama');
+  try {
+    document.getElementById('statusText').textContent = 'Descargando modelo Ollama...';
+    await api('/api/ollama/pull', {method:'POST', body:JSON.stringify({model})});
+    await loadOllamaModels();
+    alert('Modelo descargado: ' + model);
+  } catch(e) { alert('Error en pull: ' + e.message); }
+}
+async function searchHF() {
+  const q = document.getElementById('hfQuery').value.trim();
+  const el = document.getElementById('hfResults');
+  el.innerHTML = '<div class="item"><div class="s">Buscando...</div></div>';
+  try {
+    const d = await api('/api/hf/search?q=' + encodeURIComponent(q) + '&limit=20');
+    const res = d.results || [];
+    if(!res.length){ el.innerHTML='<div class="item"><div class="s">Sin resultados.</div></div>'; return; }
+    el.innerHTML = res.map(r => `<div class="item" onclick="selectHFRepo('${(r.id||'').replace(/'/g, "\\'")}')">
+      <div class="t">${r.id||''}</div>
+      <div class="s">⬇ ${r.downloads||0} · ❤ ${r.likes||0}</div>
+    </div>`).join('');
+  } catch(e) { el.innerHTML = `<div class="item"><div class="s">Error: ${e.message}</div></div>`; }
+}
+async function selectHFRepo(repo) {
+  document.getElementById('hfFiles').innerHTML = '<div class="item"><div class="s">Cargando archivos...</div></div>';
+  try {
+    const d = await api('/api/hf/files?repo=' + encodeURIComponent(repo));
+    const files = d.files || [];
+    if(!files.length){ document.getElementById('hfFiles').innerHTML='<div class="item"><div class="s">No se encontraron .gguf en este repo.</div></div>'; return; }
+    document.getElementById('hfFiles').innerHTML = files.map(f => {
+      const ref = repo + ':' + f.filename;
+      return `<div class="item" onclick="selectHFFile('${ref.replace(/'/g,"\\'")}')">
+        <div class="t">${f.filename}</div>
+        <div class="s">${f.size_mb?f.size_mb+' MB':''}</div>
+      </div>`;
+    }).join('');
+  } catch(e) { document.getElementById('hfFiles').innerHTML = `<div class="item"><div class="s">Error: ${e.message}</div></div>`; }
+}
+function selectHFFile(ref){ document.getElementById('llamaModel').value = ref; }
+async function startServer() {
+  const backend = document.getElementById('backend').value;
+  const model = backend==='ollama' ? document.getElementById('ollamaModel').value.trim() : document.getElementById('llamaModel').value.trim();
+  if(!model) return alert('Selecciona o escribe un modelo');
+  const body = {
+    backend, model,
+    n_ctx: parseInt(document.getElementById('nCtx').value||'4096'),
+    n_gpu_layers: parseInt(document.getElementById('nGpuLayers').value||'-1'),
+    cache_type_k: document.getElementById('cacheK').value,
+    cache_type_v: document.getElementById('cacheV').value,
+    flash_attn: document.getElementById('flashAttn').value === 'true',
+    n_batch: parseInt(document.getElementById('nBatch').value||'0'),
+    n_threads: parseInt(document.getElementById('nThreads').value||'0'),
+  };
+  document.getElementById('startBtn').disabled = true;
+  try {
+    await api('/api/server/start', {method:'POST', body:JSON.stringify(body)});
+  } catch(e) { alert('Error: '+e.message); }
+  finally { setTimeout(()=>document.getElementById('startBtn').disabled=false, 2000); }
+}
+async function stopServer() {
+  if(!confirm('¿Detener el modelo actual?')) return;
+  await api('/api/server/stop', {method:'POST'});
+  await refreshStatus();
+}
+async function refreshAll(){ await refreshStatus(); await loadOllamaModels(); await loadLogs(); }
+refreshStatus(); loadOllamaModels(); loadLogs();
+setInterval(refreshStatus, 3000);
+setInterval(loadLogs, 4000);
+</script>
+</body>
+</html>
