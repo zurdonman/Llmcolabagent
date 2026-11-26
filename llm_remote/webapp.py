@@ -33,6 +33,7 @@ class AppState:
         self.log_path = Path(__file__).resolve().parent.parent / "logs" / "backend.log"
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self._log_file = None
+        self.download_progress: dict = {"active": False}
 
     def open_log(self):
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -80,6 +81,7 @@ def _stop_backend(state: AppState):
     state.model_loaded = ""
     state.status = "stopped"
     state.status_detail = ""
+    state.download_progress = {"active": False}
     state.close_log()
 
 
@@ -92,7 +94,19 @@ def _start_backend_thread(state: AppState, req_cfg: dict):
         _stop_backend(state)
         state.status = "starting"
         state.status_detail = "Iniciando backend..."
+        state.download_progress = {"active": False}
 
+    def _on_progress(info):
+        state.download_progress = info
+        if info.get("active"):
+            pct = info.get("percent")
+            label = info.get("label", "descarga")
+            if pct is not None:
+                state.status_detail = f"Descargando: {label} ({pct:.1f}%)"
+            else:
+                state.status_detail = f"Descargando: {label}"
+
+    backends.set_progress_callback(_on_progress)
     try:
         cfg = state.cfg
         # apply overrides from request
@@ -135,6 +149,7 @@ def _start_backend_thread(state: AppState, req_cfg: dict):
             state.status = "running"
             state.model_loaded = cfg.model
             state.status_detail = "Modelo listo"
+            state.download_progress = {"active": False, "percent": 100}
     except Exception as e:
         with state.lock:
             backends.stop_process(state.backend_proc)
@@ -144,7 +159,10 @@ def _start_backend_thread(state: AppState, req_cfg: dict):
             state.model_loaded = ""
             state.status = "error"
             state.status_detail = str(e)
+            state.download_progress = {"active": False}
             state.close_log()
+    finally:
+        backends.set_progress_callback(None)
 
 
 def create_app(cfg: Config) -> FastAPI:
@@ -205,6 +223,22 @@ def create_app(cfg: Config) -> FastAPI:
 
     @app.get("/api/status")
     async def api_status():
+        dp = dict(state.download_progress) if isinstance(state.download_progress, dict) else {"active": False}
+        # If no active own-download, try to infer progress from backend log (llama-server HF download etc.)
+        if not dp.get("active") and state.status == "starting":
+            try:
+                if state.log_path.exists():
+                    tail = state.log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-30:]
+                    import re as _re
+                    for line in reversed(tail):
+                        m = _re.search(r"(\d{1,3}(?:\.\d+)?)\s*%", line)
+                        if m:
+                            pct = float(m.group(1))
+                            if 0 <= pct <= 100:
+                                dp = {"active": True, "label": "modelo/backend (ver log)", "percent": pct}
+                                break
+            except Exception:
+                pass
         return {
             "status": state.status,
             "status_detail": state.status_detail,
@@ -215,6 +249,7 @@ def create_app(cfg: Config) -> FastAPI:
             "local_url": f"http://127.0.0.1:{state.cfg.port}",
             "api_key": state.cfg.api_key,
             "port": state.cfg.port,
+            "download_progress": dp,
             "config": {
                 "n_ctx": state.cfg.n_ctx,
                 "n_gpu_layers": state.cfg.n_gpu_layers,

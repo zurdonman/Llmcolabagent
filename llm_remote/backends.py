@@ -10,6 +10,22 @@ import time
 import urllib.request
 import zipfile
 from pathlib import Path
+from typing import Callable, Optional
+
+_progress_cb: Optional[Callable[[dict], None]] = None
+
+
+def set_progress_callback(cb: Optional[Callable[[dict], None]]):
+    global _progress_cb
+    _progress_cb = cb
+
+
+def _report_progress(**kwargs):
+    if _progress_cb:
+        try:
+            _progress_cb(kwargs)
+        except Exception:
+            pass
 
 
 def _bin_dir() -> Path:
@@ -28,9 +44,11 @@ def _download(url: str, dest: Path, desc: str = "") -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists() and dest.stat().st_size > 0:
         print(f"[backend] Ya existe: {dest}")
+        _report_progress(active=False, label=desc or dest.name, percent=100, downloaded=dest.stat().st_size, total=dest.stat().st_size)
         return
     label = desc or url
     print(f"[backend] Descargando {label} ...")
+    _report_progress(active=True, label=label, percent=0, downloaded=0, total=None)
     req = urllib.request.Request(url, headers={"User-Agent": "llm-remote/1.0"})
     tmp = dest.with_suffix(dest.suffix + ".part")
     try:
@@ -40,6 +58,7 @@ def _download(url: str, dest: Path, desc: str = "") -> None:
             downloaded = 0
             chunk = 1024 * 1024
             last_report = 0.0
+            t0 = time.time()
             while True:
                 buf = r.read(chunk)
                 if not buf:
@@ -47,12 +66,12 @@ def _download(url: str, dest: Path, desc: str = "") -> None:
                 f.write(buf)
                 downloaded += len(buf)
                 now = time.time()
-                if now - last_report >= 5:
-                    if total:
-                        pct = downloaded * 100 / total
-                        print(f"[backend]   {downloaded/1e6:.1f}/{total/1e6:.1f} MB ({pct:.1f}%)")
-                    else:
-                        print(f"[backend]   {downloaded/1e6:.1f} MB")
+                if now - last_report >= 1:
+                    pct = (downloaded * 100 / total) if total else 0
+                    speed = downloaded / max(now - t0, 0.001)
+                    msg = f"{downloaded/1e6:.1f}/{total/1e6:.1f} MB ({pct:.1f}%)" if total else f"{downloaded/1e6:.1f} MB"
+                    print(f"[backend]   {msg}")
+                    _report_progress(active=True, label=label, percent=round(pct,1), downloaded=downloaded, total=total, speed=speed)
                     last_report = now
         tmp.replace(dest)
     finally:
@@ -61,6 +80,8 @@ def _download(url: str, dest: Path, desc: str = "") -> None:
                 tmp.unlink()
             except Exception:
                 pass
+    size = dest.stat().st_size if dest.exists() else downloaded
+    _report_progress(active=False, label=label, percent=100, downloaded=size, total=size)
     print(f"[backend] Descarga completada: {dest}")
 
 
@@ -100,9 +121,11 @@ def ensure_llama_server(binary_hint: str = "") -> str:
 
     # Try to fetch latest release from GitHub API
     print("[backend] Buscando release más reciente de llama.cpp...")
+    _report_progress(active=True, label="Consultando releases de llama.cpp", percent=0)
     try:
         rel = _http_json("https://api.github.com/repos/ggml-org/llama.cpp/releases/latest")
     except Exception as e:
+        _report_progress(active=False, label="Error consultando llama.cpp", percent=0)
         raise RuntimeError(
             "No se pudo consultar la release de llama.cpp. "
             "Especifica --llama-binary o instala llama-server manualmente."
@@ -111,6 +134,7 @@ def ensure_llama_server(binary_hint: str = "") -> str:
     tag = rel.get("tag_name", "")
     assets = rel.get("assets", [])
     names = [a["name"] for a in assets]
+    print(f"[backend] Release llama.cpp: {tag} ({len(assets)} assets)")
 
     def pick(candidates):
         for c in candidates:
