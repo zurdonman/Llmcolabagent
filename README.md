@@ -57,9 +57,16 @@ python run.py --help
 | `--flash-attn` | Activa Flash Attention | off |
 | `--n-batch` | Batch size | auto |
 | `--n-threads` | Threads CPU | auto |
+| `--jinja` / `--no-jinja` | Plantillas Jinja para tool-calling | on |
 | `--ctx-shift` / `--no-ctx-shift` | Ventana deslizante de contexto | on |
 | `--defrag-thold` | Umbral de defragmentación KV | `-1` |
 | `--keep` | Tokens a conservar en shift | `0` |
+
+## Catálogo rápido
+
+La UI incluye presets aplicables con un clic (rellenan modelo/configuración), por ejemplo:
+- **Qwythos-9B (MXFP4, uncensored)**: preset orientado a agente con contexto grande, KV `q8_0/q8_0`, `--jinja`, flash attention y context shift activado. Busca el GGUF en HuggingFace desde el panel y selecciona el archivo MXFP4.
+- Presets adicionales para pruebas rápidas.
 
 ## Panel web (qué puedes hacer)
 

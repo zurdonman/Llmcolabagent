@@ -258,6 +258,8 @@ def start_llama_server(cfg, internal_port: int, log_file) -> subprocess.Popen:
         cmd += ["-b", str(cfg.n_batch)]
     if cfg.n_threads and cfg.n_threads > 0:
         cmd += ["-t", str(cfg.n_threads)]
+    if cfg.jinja:
+        cmd += ["--jinja"]
     if not cfg.ctx_shift:
         cmd += ["--no-context-shift"]
     if cfg.defrag_thold >= 0:
