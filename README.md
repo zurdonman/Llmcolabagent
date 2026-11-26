@@ -59,7 +59,6 @@ python run.py --help
 | `--n-threads` | Threads CPU | auto |
 | `--jinja` / `--no-jinja` | Plantillas Jinja para tool-calling | on |
 | `--ctx-shift` / `--no-ctx-shift` | Ventana deslizante de contexto | on |
-| `--defrag-thold` | Umbral de defragmentación KV | `-1` |
 | `--keep` | Tokens a conservar en shift | `0` |
 
 ## Catálogo rápido
@@ -85,7 +84,7 @@ La UI incluye presets aplicables con un clic (rellenan modelo/configuración), p
 ### Configuración de memoria/rendimiento
 - **KV cache K/V**: cuantiza la cache KV (`q8_0`, `q4_0`, etc.) para reducir VRAM/RAM y permitir más contexto.
 - **Ventana deslizante / Context shift**: activada por defecto para reutilizar contexto cuando se llena y evitar OOM.
-- **Defrag threshold / Keep tokens**: ajuste fino de la gestión de KV.
+- **Keep tokens**: conserva tokens iniciales al hacer context shift.
 - **Flash Attention**: `-fa` para mejor rendimiento/memoria en GPUs compatibles.
 - **n_ctx, n_gpu_layers, n_batch, n_threads**: control de carga del modelo.
 

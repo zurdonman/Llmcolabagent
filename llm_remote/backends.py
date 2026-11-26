@@ -297,8 +297,6 @@ def start_llama_server(cfg, internal_port: int, log_file) -> subprocess.Popen:
         cmd += ["--jinja"]
     if not cfg.ctx_shift:
         cmd += ["--no-context-shift"]
-    if cfg.defrag_thold >= 0:
-        cmd += ["--defrag-thold", str(cfg.defrag_thold)]
     if cfg.keep and cfg.keep > 0:
         cmd += ["--keep", str(cfg.keep)]
 

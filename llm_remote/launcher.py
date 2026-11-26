@@ -100,7 +100,6 @@ def run(cfg: Config):
             "n_threads": cfg.n_threads,
             "jinja": cfg.jinja,
             "ctx_shift": cfg.ctx_shift,
-            "defrag_thold": cfg.defrag_thold,
             "keep": cfg.keep,
         }
         threading.Thread(target=_start_backend_thread, args=(get_state(), req_cfg), daemon=True).start()
