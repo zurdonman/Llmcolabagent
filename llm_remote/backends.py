@@ -302,6 +302,8 @@ def start_llama_server(cfg, internal_port: int, log_file) -> subprocess.Popen:
         cmd += ["-b", str(cfg.n_batch)]
     if cfg.n_threads and cfg.n_threads > 0:
         cmd += ["-t", str(cfg.n_threads)]
+    if cfg.n_parallel and cfg.n_parallel > 0:
+        cmd += ["--parallel", str(cfg.n_parallel)]
     if cfg.jinja:
         cmd += ["--jinja"]
     if not cfg.ctx_shift:

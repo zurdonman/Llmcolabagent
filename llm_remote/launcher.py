@@ -98,6 +98,7 @@ def run(cfg: Config):
             "flash_attn": cfg.flash_attn,
             "n_batch": cfg.n_batch,
             "n_threads": cfg.n_threads,
+            "n_parallel": cfg.n_parallel,
             "jinja": cfg.jinja,
             "ctx_shift": cfg.ctx_shift,
             "keep": cfg.keep,

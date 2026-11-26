@@ -119,6 +119,7 @@ def _start_backend_thread(state: AppState, req_cfg: dict):
         cfg.flash_attn = bool(req_cfg.get("flash_attn", cfg.flash_attn))
         cfg.n_batch = int(req_cfg.get("n_batch", cfg.n_batch))
         cfg.n_threads = int(req_cfg.get("n_threads", cfg.n_threads))
+        cfg.n_parallel = int(req_cfg.get("n_parallel", cfg.n_parallel))
         cfg.jinja = bool(req_cfg.get("jinja", cfg.jinja))
         cfg.ctx_shift = bool(req_cfg.get("ctx_shift", cfg.ctx_shift))
         cfg.keep = int(req_cfg.get("keep", cfg.keep))
@@ -257,6 +258,7 @@ def create_app(cfg: Config) -> FastAPI:
                 "flash_attn": state.cfg.flash_attn,
                 "n_batch": state.cfg.n_batch,
                 "n_threads": state.cfg.n_threads,
+                "n_parallel": state.cfg.n_parallel,
                 "jinja": state.cfg.jinja,
                 "ctx_shift": state.cfg.ctx_shift,
                 "keep": state.cfg.keep,

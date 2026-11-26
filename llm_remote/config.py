@@ -22,6 +22,7 @@ class Config:
     flash_attn: bool = False
     n_batch: int = 0  # 0 = llama-server default
     n_threads: int = 0  # 0 = auto
+    n_parallel: int = 1  # slots/parallel requests; 1 is best for single agent
     jinja: bool = True  # --jinja for tool calling templates
     ctx_shift: bool = True  # context shifting / sliding window to avoid OOM
     keep: int = 0  # tokens to keep when shifting (0 = auto)
@@ -64,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--flash-attn", action="store_true", default=os.getenv("LLM_FLASH_ATTN", "").lower() in ("1","true","yes"))
     p.add_argument("--n-batch", type=int, default=int(os.getenv("LLM_N_BATCH", "0")))
     p.add_argument("--n-threads", type=int, default=int(os.getenv("LLM_N_THREADS", "0")))
+    p.add_argument("--n-parallel", type=int, default=int(os.getenv("LLM_N_PARALLEL", "1")))
     p.add_argument("--jinja", action="store_true", default=os.getenv("LLM_JINJA", "1").lower() in ("1","true","yes"))
     p.add_argument("--no-jinja", action="store_true")
     p.add_argument("--ctx-shift", action="store_true", default=os.getenv("LLM_CTX_SHIFT", "1").lower() in ("1","true","yes"))
@@ -94,6 +96,7 @@ def config_from_args(args: argparse.Namespace) -> Config:
         flash_attn=args.flash_attn,
         n_batch=args.n_batch,
         n_threads=args.n_threads,
+        n_parallel=args.n_parallel,
         jinja=(args.jinja and not args.no_jinja),
         ctx_shift=(args.ctx_shift and not args.no_ctx_shift),
         keep=args.keep,
