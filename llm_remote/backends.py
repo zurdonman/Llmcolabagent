@@ -268,16 +268,25 @@ def start_llama_server(cfg, internal_port: int, log_file) -> subprocess.Popen:
     cmd = [binary, "--host", "127.0.0.1", "--port", str(internal_port), "-c", str(cfg.n_ctx)]
 
     if is_hf:
-        # support owner/repo:file_or_quant
+        # Download HF GGUF ourselves for real-time progress, then load locally
         if ":" in model_arg:
             repo, selector = model_arg.rsplit(":", 1)
-            cmd += ["-hf", repo]
-            if selector.endswith(".gguf"):
-                cmd += ["-hff", selector]
-            else:
-                cmd += ["-hff", selector]
+            filename = selector.strip()
         else:
-            cmd += ["-hf", model_arg]
+            repo, filename = model_arg, ""
+        if filename and filename.lower().endswith(".gguf"):
+            url = f"https://huggingface.co/{repo}/resolve/main/{filename}"
+            dest = _models_dir() / filename.replace("/", "_")
+            print(f"[backend] Descargando modelo desde HuggingFace: {repo}/{filename}")
+            _download(url, dest, desc=filename)
+            cmd += ["-m", str(dest)]
+        else:
+            # Fallback: let llama-server handle it
+            if ":" in model_arg:
+                repo, selector = model_arg.rsplit(":", 1)
+                cmd += ["-hf", repo, "-hff", selector]
+            else:
+                cmd += ["-hf", model_arg]
     else:
         cmd += ["-m", model_arg]
 
