@@ -288,7 +288,7 @@ def start_llama_server(cfg, internal_port: int, log_file) -> subprocess.Popen:
     if cfg.cache_type_v:
         cmd += ["--cache-type-v", cfg.cache_type_v]
     if cfg.flash_attn:
-        cmd += ["-fa"]
+        cmd += ["--flash-attn", "on"]
     if cfg.n_batch and cfg.n_batch > 0:
         cmd += ["-b", str(cfg.n_batch)]
     if cfg.n_threads and cfg.n_threads > 0:
