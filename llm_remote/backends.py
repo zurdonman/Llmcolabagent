@@ -288,10 +288,17 @@ def ensure_llama_server(binary_hint: str = "") -> str:
                 else:
                     candidates = sorted(all_cuda, key=lambda a: (0 if not is_cudart(a["name"]) else 1))
 
+                # Pick main server binary (non-cudart). cudart assets are runtime-lib companions only.
+                for a in candidates:
+                    if is_cudart(a["name"]):
+                        continue
+                    bv = cuda_build_ver(a["name"])
+                    print(f"[backend] Candidato cuda: {a['name']} (build cuda {bv[0]}.{bv[1]})")
+                    return a
+                # Last resort: if only cudart exists, return it (will likely fail to find server)
                 for a in candidates:
                     bv = cuda_build_ver(a["name"])
-                    kind = "cudart" if is_cudart(a["name"]) else "cuda"
-                    print(f"[backend] Candidato {kind}: {a['name']} (build cuda {bv[0]}.{bv[1]})")
+                    print(f"[backend] Candidato cudart (único): {a['name']} (build cuda {bv[0]}.{bv[1]})")
                     return a
 
                 # Vulkan fallback only if no CUDA builds
@@ -372,23 +379,26 @@ def ensure_llama_server(binary_hint: str = "") -> str:
 
     # Also extract cudart companion if present
     if cudart_asset:
-        ca_path = bdir / cudart_asset["name"]
-        _download(cudart_asset["browser_download_url"], ca_path, desc=f"cudart {tag} ({cudart_asset['name']})")
-        print(f"[backend] Extrayendo {ca_path.name} ...")
-        ca_extract = bdir / f"llama-{tag}-cudart"
-        ca_extract.mkdir(parents=True, exist_ok=True)
-        if ca_path.name.endswith(".zip"):
-            with zipfile.ZipFile(ca_path, "r") as z:
-                z.extractall(ca_extract)
-        else:
-            with tarfile.open(ca_path, "r:*") as t:
-                t.extractall(ca_extract)
-        # copy cudart libs into main extract dir (so they end up next to llama-server)
-        for f in ca_extract.rglob("*"):
-            if f.is_file() and (".so" in f.name or f.suffix in (".dll", ".dylib")):
-                dest_f = extract_dir / f.name
-                if not dest_f.exists():
-                    shutil.copy2(f, dest_f)
+        try:
+            ca_path = bdir / cudart_asset["name"]
+            _download(cudart_asset["browser_download_url"], ca_path, desc=f"cudart {tag} ({cudart_asset['name']})")
+            print(f"[backend] Extrayendo {ca_path.name} ...")
+            ca_extract = bdir / f"llama-{tag}-cudart"
+            ca_extract.mkdir(parents=True, exist_ok=True)
+            if ca_path.name.endswith(".zip"):
+                with zipfile.ZipFile(ca_path, "r") as z:
+                    z.extractall(ca_extract)
+            else:
+                with tarfile.open(ca_path, "r:*") as t:
+                    t.extractall(ca_extract)
+            # copy cudart libs into main extract dir (so they end up next to llama-server)
+            for f in ca_extract.rglob("*"):
+                if f.is_file() and (".so" in f.name or f.suffix in (".dll", ".dylib")):
+                    dest_f = extract_dir / f.name
+                    if not dest_f.exists():
+                        shutil.copy2(f, dest_f)
+        except Exception as e:
+            print(f"[backend] Advertencia: no se pudo extraer cudart companion: {e}")
 
     # find llama-server inside
     candidates = list(extract_dir.rglob(exe))
