@@ -192,13 +192,22 @@ def ensure_llama_server(binary_hint: str = "") -> str:
                         bv = cuda_build_ver(best["name"])
                         if bv[0] < cuda_ver[0]:
                             # check if major compat libs exist
-                            has_compat = any(Path(p).glob(f"libcudart.so.{bv[0]}*") for p in ["/usr/local/cuda/lib64","/usr/local/cuda/lib","/usr/lib/x86_64-linux-gnu","/usr/local/cuda-*/lib64"])
-                            if not has_compat:
-                                print(f"[backend] CUDA build {bv[0]}.{bv[1]} puede no ser compatible con CUDA {cuda_ver[0]}.{cuda_ver[1]} del sistema; probando Vulkan...")
-                                vulkan = by_name([lambda n: n.endswith(".tar.gz") and "ubuntu" in n and "x64" in n and "vulkan" in n])
-                                if vulkan:
-                                    print(f"[backend] Candidato Vulkan: {vulkan['name']}")
-                                    return vulkan
+                            import glob as _glob
+                            compat_patterns = [
+                                f"/usr/local/cuda/lib64/libcudart.so.{bv[0]}*",
+                                f"/usr/local/cuda/lib/libcudart.so.{bv[0]}*",
+                                f"/usr/lib/x86_64-linux-gnu/libcudart.so.{bv[0]}*",
+                                f"/usr/local/cuda-*/lib64/libcudart.so.{bv[0]}*",
+                                f"/usr/local/cuda-*/lib*/libcudart.so.{bv[0]}*",
+                            ]
+                            has_compat = any(_glob.glob(pat) for pat in compat_patterns)
+                            print(f"[backend] Compat CUDA {bv[0]}.x libs: {'sí' if has_compat else 'no'}")
+                            # Major mismatch is risky in practice; prefer Vulkan for reliability
+                            print(f"[backend] CUDA build {bv[0]}.{bv[1]} difiere de CUDA {cuda_ver[0]}.{cuda_ver[1]} del sistema; probando Vulkan...")
+                            vulkan = by_name([lambda n: n.endswith(".tar.gz") and "ubuntu" in n and "x64" in n and "vulkan" in n])
+                            if vulkan:
+                                print(f"[backend] Candidato Vulkan: {vulkan['name']}")
+                                return vulkan
                         pick_cuda = best
                     if pick_cuda:
                         print(f"[backend] Candidato CUDA: {pick_cuda['name']}")
