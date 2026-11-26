@@ -262,52 +262,53 @@ def ensure_llama_server(binary_hint: str = "") -> str:
         if system == "linux" and machine in ("x86_64", "amd64"):
             if _has_nvidia_gpu():
                 cuda_ver = _detect_cuda_version()
-                print(f"[backend] CUDA detectada: {cuda_ver[0]}.{cuda_ver[1]}" if cuda_ver else "[backend] CUDA no detectada, intentando build CUDA genérico")
-                cuda_assets = [a for a in assets if a["name"].lower().endswith(".tar.gz") and "ubuntu" in a["name"].lower() and "x64" in a["name"].lower() and "cuda" in a["name"].lower() and "cudart" not in a["name"].lower()]
+                print(f"[backend] CUDA detectada: {cuda_ver[0]}.{cuda_ver[1]}" if cuda_ver else "[backend] GPU NVIDIA detectada (versión CUDA desconocida)")
+                all_cuda = [a for a in assets if a["name"].lower().endswith(".tar.gz") and "ubuntu" in a["name"].lower() and "x64" in a["name"].lower() and "cuda" in a["name"].lower()]
                 def cuda_build_ver(name):
                     import re
                     m = re.search(r"cuda-(\d+)\.(\d+)", name.lower())
                     return (int(m.group(1)), int(m.group(2))) if m else (0,0)
+                def is_cudart(name):
+                    return "cudart" in name.lower()
+
+                # Prefer build <= driver CUDA. Prefer non-cudart (full) first; cudart bundles runtime libs.
+                candidates = []
                 if cuda_ver:
-                    leq = sorted([a for a in cuda_assets if cuda_build_ver(a["name"]) <= cuda_ver], key=lambda a: cuda_build_ver(a["name"]), reverse=True)
-                    gt = sorted([a for a in cuda_assets if cuda_build_ver(a["name"]) > cuda_ver], key=lambda a: cuda_build_ver(a["name"]))
-                    # If best leq is older major (e.g. cuda 12 build on cuda 13 system), check runtime compat; if missing, prefer vulkan
-                    pick_cuda = None
-                    if leq:
-                        best = leq[0]
-                        bv = cuda_build_ver(best["name"])
-                        if bv[0] < cuda_ver[0]:
-                            # check if major compat libs exist
-                            import glob as _glob
-                            compat_patterns = [
-                                f"/usr/local/cuda/lib64/libcudart.so.{bv[0]}*",
-                                f"/usr/local/cuda/lib/libcudart.so.{bv[0]}*",
-                                f"/usr/lib/x86_64-linux-gnu/libcudart.so.{bv[0]}*",
-                                f"/usr/local/cuda-*/lib64/libcudart.so.{bv[0]}*",
-                                f"/usr/local/cuda-*/lib*/libcudart.so.{bv[0]}*",
-                            ]
-                            has_compat = any(_glob.glob(pat) for pat in compat_patterns)
-                            print(f"[backend] Compat CUDA {bv[0]}.x libs: {'sí' if has_compat else 'no'}")
-                            # Major mismatch is risky in practice; prefer Vulkan for reliability
-                            print(f"[backend] CUDA build {bv[0]}.{bv[1]} difiere de CUDA {cuda_ver[0]}.{cuda_ver[1]} del sistema; probando Vulkan...")
-                            vulkan = by_name([lambda n: n.endswith(".tar.gz") and "ubuntu" in n and "x64" in n and "vulkan" in n])
-                            if vulkan:
-                                print(f"[backend] Candidato Vulkan: {vulkan['name']}")
-                                return vulkan
-                        pick_cuda = best
-                    if pick_cuda:
-                        print(f"[backend] Candidato CUDA: {pick_cuda['name']}")
-                        return pick_cuda
-                    if gt:
-                        # newer build than driver - risky, but try vulkan first
-                        vulkan = by_name([lambda n: n.endswith(".tar.gz") and "ubuntu" in n and "x64" in n and "vulkan" in n])
-                        if vulkan:
-                            print(f"[backend] Candidato Vulkan: {vulkan['name']}")
-                            return vulkan
-                        print(f"[backend] Candidato CUDA (puede requerir driver más nuevo): {gt[0]['name']}")
-                        return gt[0]
-                elif cuda_assets:
-                    return cuda_assets[0]
+                    leq = sorted([a for a in all_cuda if cuda_build_ver(a["name"]) <= cuda_ver], key=lambda a: (cuda_build_ver(a["name"]), 0 if not is_cudart(a["name"]) else 1), reverse=True)
+                    # For major mismatch (e.g. system 13.0, build 12.8), prefer cudart bundle - it includes runtime libs
+                    reordered = []
+                    for a in leq:
+                        bv = cuda_build_ver(a["name"])
+                        if bv[0] < cuda_ver[0] and is_cudart(a["name"]):
+                            reordered.insert(0, a)
+                        else:
+                            reordered.append(a)
+                    # dedupe preserving order
+                    seen = set()
+                    for a in reordered:
+                        if a["name"] not in seen:
+                            seen.add(a["name"])
+                            candidates.append(a)
+                    # also consider higher builds (risky) after
+                    gt = sorted([a for a in all_cuda if cuda_build_ver(a["name"]) > cuda_ver], key=lambda a: cuda_build_ver(a["name"]))
+                    for a in gt:
+                        if a["name"] not in seen:
+                            candidates.append(a)
+                else:
+                    candidates = all_cuda
+
+                for a in candidates:
+                    bv = cuda_build_ver(a["name"])
+                    kind = "cudart" if is_cudart(a["name"]) else "cuda"
+                    print(f"[backend] Candidato {kind}: {a['name']} (build cuda {bv[0]}.{bv[1]})")
+                    return a
+
+                # Vulkan fallback only if no CUDA builds
+                vulkan = by_name([lambda n: n.endswith(".tar.gz") and "ubuntu" in n and "x64" in n and "vulkan" in n])
+                if vulkan:
+                    print(f"[backend] Candidato Vulkan (sin builds CUDA): {vulkan['name']}")
+                    return vulkan
+
             a = by_name([
                 lambda n: n.endswith(".tar.gz") and "ubuntu" in n and "x64" in n and all(k not in n for k in ["cuda","vulkan","rocm","sycl","openvino","opencl","cann"]),
             ])
@@ -395,6 +396,23 @@ def ensure_llama_server(binary_hint: str = "") -> str:
     if os.name != "nt":
         final.chmod(final.stat().st_mode | stat.S_IEXEC)
     print(f"[backend] llama-server listo: {final}")
+    # Diagnostic: list devices
+    try:
+        import subprocess as _sp
+        env = os.environ.copy()
+        bdir_lib = str(final.parent)
+        if platform.system().lower() == "linux":
+            env["LD_LIBRARY_PATH"] = bdir_lib + (":" + env["LD_LIBRARY_PATH"] if env.get("LD_LIBRARY_PATH") else "")
+        for args in [[str(final), "--list-devices"], [str(final), "--version"]]:
+            try:
+                r = _sp.run(args, capture_output=True, text=True, timeout=30, env=env)
+                out = ((r.stdout or "") + "\n" + (r.stderr or "")).strip()
+                if out:
+                    print(f"[diag] {' '.join(args[-1:])}:\n{out[:3000]}")
+            except Exception as e:
+                print(f"[diag] {' '.join(args)} falló: {e}")
+    except Exception as e:
+        print(f"[diag] No se pudo ejecutar diagnóstico de llama-server: {e}")
     return str(final)
 
 
