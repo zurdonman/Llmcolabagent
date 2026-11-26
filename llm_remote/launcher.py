@@ -50,6 +50,28 @@ def run(cfg: Config):
     import threading
     if cfg.tunnel != "none":
         threading.Thread(target=_tunnel_worker, daemon=True).start()
+
+    # Auto-start model if provided via CLI
+    if cfg.model:
+        from .webapp import _start_backend_thread
+        req_cfg = {
+            "backend": cfg.backend,
+            "model": cfg.model,
+            "n_ctx": cfg.n_ctx,
+            "n_gpu_layers": cfg.n_gpu_layers,
+            "cache_type_k": cfg.cache_type_k,
+            "cache_type_v": cfg.cache_type_v,
+            "flash_attn": cfg.flash_attn,
+            "n_batch": cfg.n_batch,
+            "n_threads": cfg.n_threads,
+            "jinja": cfg.jinja,
+            "ctx_shift": cfg.ctx_shift,
+            "defrag_thold": cfg.defrag_thold,
+            "keep": cfg.keep,
+        }
+        threading.Thread(target=_start_backend_thread, args=(get_state(), req_cfg), daemon=True).start()
+        print(f"[launcher] Auto-iniciando modelo: {cfg.model}")
+
     _print_banner(cfg, None)
 
     # Graceful shutdown on signals
