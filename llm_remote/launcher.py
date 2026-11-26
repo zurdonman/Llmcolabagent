@@ -32,6 +32,12 @@ def _print_banner(cfg: Config, public_url: str | None):
 def run(cfg: Config):
     app = create_app(cfg)
     state = get_state()
+    # Log GPU diagnostics for debugging
+    try:
+        from . import backends
+        backends.log_gpu_diagnostics()
+    except Exception as e:
+        print(f"[launcher] No se pudo obtener diagnóstico GPU: {e}")
 
     # Start tunnel in background so UI is available; update state when ready
     def _tunnel_worker():

@@ -95,6 +95,58 @@ def _has_nvidia_gpu() -> bool:
     return shutil.which("nvidia-smi") is not None
 
 
+def log_gpu_diagnostics():
+    """Log GPU/CUDA/Vulkan diagnostics to help debug offload issues."""
+    import subprocess as _sp
+    lines = []
+    cmds = [
+        ["nvidia-smi", "--query-gpu=name,driver_version,memory.total", "--format=csv,noheader"],
+        ["nvcc", "--version"],
+        ["vulkaninfo", "--summary"],
+        ["ldconfig", "-p"],
+    ]
+    for cmd in cmds:
+        try:
+            r = _sp.run(cmd, capture_output=True, text=True, timeout=15)
+            out = (r.stdout or "") + (r.stderr or "")
+            out = out.strip()
+            if out:
+                lines.append(f"$ {' '.join(cmd)}\n{out[:2000]}")
+        except FileNotFoundError:
+            lines.append(f"$ {' '.join(cmd)}\n(no encontrado)")
+        except Exception as e:
+            lines.append(f"$ {' '.join(cmd)}\n(error: {e})")
+    msg = "\n".join(lines)
+    print("[diag] Diagnóstico GPU:\n" + msg)
+    return msg
+
+
+def ensure_vulkan_runtime():
+    """Try to install Vulkan runtime on Linux if missing."""
+    if platform.system().lower() != "linux":
+        return
+    import subprocess as _sp, shutil as _sh
+    # Check libvulkan
+    has_vulkan = bool(_sh.which("vulkaninfo")) or Path("/usr/lib/x86_64-linux-gnu/libvulkan.so.1").exists() or Path("/usr/lib64/libvulkan.so.1").exists()
+    if has_vulkan:
+        print("[backend] Vulkan runtime detectado.")
+        return
+    if not _sh.which("apt-get"):
+        print("[backend] No se encontró apt-get para instalar Vulkan runtime.")
+        return
+    print("[backend] Instalando Vulkan runtime (libvulkan1, mesa-vulkan-drivers)...")
+    try:
+        _sp.run(["apt-get", "update", "-qq"], check=False, capture_output=True, text=True, timeout=120)
+        r = _sp.run(["apt-get", "install", "-y", "-qq", "libvulkan1", "mesa-vulkan-drivers", "vulkan-tools"],
+                    check=False, capture_output=True, text=True, timeout=300)
+        if r.returncode != 0:
+            print(f"[backend] Aviso instalando Vulkan: {r.stderr[-500:]}")
+        else:
+            print("[backend] Vulkan runtime instalado.")
+    except Exception as e:
+        print(f"[backend] No se pudo instalar Vulkan runtime: {e}")
+
+
 def _detect_cuda_version() -> tuple[int, int] | None:
     """Return (major, minor) CUDA version if detectable, else None."""
     import re, subprocess as _sp
@@ -256,6 +308,10 @@ def ensure_llama_server(binary_hint: str = "") -> str:
             f"No se encontró un asset de llama-server para {system}/{machine} en releases recientes. "
             "Especifica --llama-binary o instala llama-server manualmente."
         )
+
+    # If Vulkan build selected, ensure Vulkan runtime is present
+    if "vulkan" in asset["name"].lower():
+        ensure_vulkan_runtime()
 
     url = asset["browser_download_url"]
     archive_path = bdir / asset["name"]
