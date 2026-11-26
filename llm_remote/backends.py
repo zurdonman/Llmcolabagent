@@ -119,58 +119,69 @@ def ensure_llama_server(binary_hint: str = "") -> str:
     if local.exists():
         return str(local)
 
-    # Try to fetch latest release from GitHub API
-    print("[backend] Buscando release más reciente de llama.cpp...")
+    # Find a release with a matching binary asset (skip tag-only releases like v1.0.0)
+    print("[backend] Buscando release de llama.cpp con binarios...")
     _report_progress(active=True, label="Consultando releases de llama.cpp", percent=0)
     try:
-        rel = _http_json("https://api.github.com/repos/ggml-org/llama.cpp/releases/latest")
+        releases = _http_json("https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=10")
+        if isinstance(releases, dict):
+            releases = [releases]
     except Exception as e:
         _report_progress(active=False, label="Error consultando llama.cpp", percent=0)
         raise RuntimeError(
-            "No se pudo consultar la release de llama.cpp. "
+            "No se pudo consultar releases de llama.cpp. "
             "Especifica --llama-binary o instala llama-server manualmente."
         ) from e
 
-    tag = rel.get("tag_name", "")
-    assets = rel.get("assets", [])
-    names = [a["name"] for a in assets]
-    print(f"[backend] Release llama.cpp: {tag} ({len(assets)} assets)")
-
-    def pick(candidates):
-        for c in candidates:
-            for a in assets:
-                if a["name"] == c:
-                    return a
-        for c in candidates:
-            for a in assets:
-                if c in a["name"]:
-                    return a
+    def pick_asset(assets, system, machine):
+        names = [a["name"] for a in assets]
+        def by_name(preds):
+            for pred in preds:
+                for a in assets:
+                    n = a["name"].lower()
+                    if pred(n):
+                        return a
+            return None
+        if system == "linux" and machine in ("x86_64", "amd64"):
+            if _has_nvidia_gpu():
+                a = by_name([
+                    lambda n: n.endswith(".tar.gz") and "ubuntu" in n and "x64" in n and "cuda" in n and "cudart" not in n,
+                    lambda n: n.endswith(".tar.gz") and "ubuntu" in n and "x64" in n and "cuda" in n,
+                ])
+                if a: return a
+            a = by_name([
+                lambda n: n.endswith(".tar.gz") and "ubuntu" in n and "x64" in n and all(k not in n for k in ["cuda","vulkan","rocm","sycl","openvino","opencl","cann"]),
+            ])
+            if a: return a
+            a = by_name([lambda n: n.endswith(".tar.gz") and "linux" in n and "x64" in n and "cuda" not in n])
+            return a
+        if system == "darwin":
+            arch = "arm64" if machine in ("arm64","aarch64") else "x64"
+            return by_name([lambda n, arch=arch: n.endswith(".tar.gz") and "macos" in n and arch in n])
+        if system == "windows":
+            if _has_nvidia_gpu():
+                a = by_name([lambda n: n.endswith(".zip") and "win" in n and "x64" in n and "cuda" in n and "cudart" not in n])
+                if a: return a
+            return by_name([
+                lambda n: n.endswith(".zip") and "win" in n and "x64" in n and "cpu" in n,
+                lambda n: n.endswith(".zip") and "win" in n and "x64" in n and all(k not in n for k in ["cuda","vulkan","rocm","sycl","openvino","opencl","cann"]),
+            ])
         return None
 
     asset = None
-    if system == "linux" and machine in ("x86_64", "amd64"):
-        # Prefer CUDA build if nvidia-smi present, else ubuntu/cpu
-        if _has_nvidia_gpu():
-            asset = pick([n for n in names if "ubuntu" in n and "x64" in n and "cu" in n and n.endswith(".tar.gz")])
-        if not asset:
-            asset = pick([n for n in names if "ubuntu" in n and "x64" in n and n.endswith(".tar.gz") and "cu" not in n])
-        if not asset:
-            asset = pick([n for n in names if "linux" in n and "x64" in n and n.endswith(".tar.gz")])
-    elif system == "darwin":
-        if machine in ("arm64", "aarch64"):
-            asset = pick([n for n in names if "macos" in n and "arm64" in n and n.endswith(".tar.gz")])
-        else:
-            asset = pick([n for n in names if "macos" in n and "x64" in n and n.endswith(".tar.gz")])
-    elif system == "windows":
-        if _has_nvidia_gpu():
-            asset = pick([n for n in names if "win" in n and "cu" in n and "x64" in n and n.endswith(".zip")])
-        if not asset:
-            asset = pick([n for n in names if "win" in n and "cpu" in n and "x64" in n and n.endswith(".zip")])
-
+    tag = ""
+    for rel in releases:
+        tag = rel.get("tag_name", "")
+        assets = rel.get("assets", []) or []
+        print(f"[backend] Revisando release {tag} ({len(assets)} assets)...")
+        asset = pick_asset(assets, system, machine)
+        if asset:
+            print(f"[backend] Release seleccionada: {tag} -> {asset['name']}")
+            break
     if not asset:
         raise RuntimeError(
-            f"No se encontró un asset de llama-server para {system}/{machine} en release {tag}. "
-            f"Assets disponibles: {names[:20]}"
+            f"No se encontró un asset de llama-server para {system}/{machine} en releases recientes. "
+            "Especifica --llama-binary o instala llama-server manualmente."
         )
 
     url = asset["browser_download_url"]

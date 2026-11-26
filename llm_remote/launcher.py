@@ -51,6 +51,40 @@ def run(cfg: Config):
     if cfg.tunnel != "none":
         threading.Thread(target=_tunnel_worker, daemon=True).start()
 
+    # Pre-download llama-server binary on startup so it's ready
+    def _prefetch_llama():
+        try:
+            from . import backends
+            state = get_state()
+            def _on_progress(info):
+                state.download_progress = info
+                if info.get("active"):
+                    pct = info.get("percent")
+                    label = info.get("label", "llama.cpp")
+                    state.status_detail = f"Preparando llama.cpp: {label} ({pct:.1f}%)" if pct is not None else f"Preparando llama.cpp: {label}"
+            backends.set_progress_callback(_on_progress)
+            state.status_detail = "Preparando llama.cpp..."
+            path = backends.ensure_llama_server(cfg.llama_binary)
+            print(f"[launcher] llama-server listo: {path}")
+            if state.status == "stopped":
+                state.status_detail = "llama.cpp listo. Selecciona un modelo para iniciar."
+            state.download_progress = {"active": False, "percent": 100}
+        except Exception as e:
+            print(f"[launcher] No se pudo pre-descargar llama-server: {e}")
+            try:
+                state = get_state()
+                if state.status == "stopped":
+                    state.status_detail = f"Aviso: no se pudo preparar llama.cpp: {e}"
+                state.download_progress = {"active": False}
+            except Exception:
+                pass
+        finally:
+            try:
+                from . import backends
+                backends.set_progress_callback(None)
+            except Exception:
+                pass
+
     # Auto-start model if provided via CLI
     if cfg.model:
         from .webapp import _start_backend_thread
@@ -71,6 +105,10 @@ def run(cfg: Config):
         }
         threading.Thread(target=_start_backend_thread, args=(get_state(), req_cfg), daemon=True).start()
         print(f"[launcher] Auto-iniciando modelo: {cfg.model}")
+    else:
+        # Prefetch in background only when not auto-starting a model
+        if cfg.backend == "llama.cpp":
+            threading.Thread(target=_prefetch_llama, daemon=True).start()
 
     _print_banner(cfg, None)
 
