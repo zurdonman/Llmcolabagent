@@ -297,6 +297,25 @@ def create_app(cfg: Config) -> FastAPI:
         except Exception as e:
             return {"lines": [f"error leyendo log: {e}"]}
 
+    @app.get("/api/logs/download")
+    async def api_logs_download():
+        parts = []
+        app_log = Path(__file__).resolve().parent.parent / "logs" / "app.log"
+        backend_log = state.log_path
+        for label, p in [("APP LOG", app_log), ("BACKEND LOG", backend_log)]:
+            parts.append(f"===== {label}: {p} =====")
+            if p.exists():
+                try:
+                    parts.append(p.read_text(encoding="utf-8", errors="replace"))
+                except Exception as e:
+                    parts.append(f"[error leyendo {p}: {e}]")
+            else:
+                parts.append("(no existe)")
+            parts.append("")
+        content = "\n".join(parts)
+        headers = {"Content-Disposition": "attachment; filename=llm-remote-logs.txt"}
+        return Response(content=content, media_type="text/plain; charset=utf-8", headers=headers)
+
     # ---------- OpenAI-compatible proxy (/v1/...) ----------
 
     def _check_auth(request: Request):

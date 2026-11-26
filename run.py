@@ -10,6 +10,40 @@ os.chdir(ROOT)
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+LOG_DIR = ROOT / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+APP_LOG = LOG_DIR / "app.log"
+
+
+class _Tee:
+    def __init__(self, *streams):
+        self.streams = streams
+    def write(self, data):
+        for s in self.streams:
+            try:
+                s.write(data)
+                s.flush()
+            except Exception:
+                pass
+    def flush(self):
+        for s in self.streams:
+            try:
+                s.flush()
+            except Exception:
+                pass
+    def isatty(self):
+        return any(getattr(s, 'isatty', lambda: False)() for s in self.streams)
+
+
+def _setup_logging():
+    try:
+        f = open(APP_LOG, "a", encoding="utf-8", buffering=1)
+        sys.stdout = _Tee(sys.__stdout__, f)
+        sys.stderr = _Tee(sys.__stderr__, f)
+        print(f"[setup] Log de app: {APP_LOG}")
+    except Exception as e:
+        print(f"[setup] No se pudo inicializar log de app: {e}")
+
 
 def ensure_deps():
     required = ["fastapi", "uvicorn", "httpx"]
@@ -37,6 +71,7 @@ def ensure_deps():
 
 
 if __name__ == "__main__":
+    _setup_logging()
     ensure_deps()
     from llm_remote.launcher import main
     main()
