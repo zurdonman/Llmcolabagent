@@ -271,31 +271,22 @@ def ensure_llama_server(binary_hint: str = "") -> str:
                 def is_cudart(name):
                     return "cudart" in name.lower()
 
-                # Prefer build <= driver CUDA. Prefer non-cudart (full) first; cudart bundles runtime libs.
+                # Prefer build <= driver CUDA. Prefer non-cudart (contains server binary); cudart is companion libs.
                 candidates = []
                 if cuda_ver:
                     leq = sorted([a for a in all_cuda if cuda_build_ver(a["name"]) <= cuda_ver], key=lambda a: (cuda_build_ver(a["name"]), 0 if not is_cudart(a["name"]) else 1), reverse=True)
-                    # For major mismatch (e.g. system 13.0, build 12.8), prefer cudart bundle - it includes runtime libs
-                    reordered = []
-                    for a in leq:
-                        bv = cuda_build_ver(a["name"])
-                        if bv[0] < cuda_ver[0] and is_cudart(a["name"]):
-                            reordered.insert(0, a)
-                        else:
-                            reordered.append(a)
-                    # dedupe preserving order
                     seen = set()
-                    for a in reordered:
+                    for a in leq:
                         if a["name"] not in seen:
                             seen.add(a["name"])
                             candidates.append(a)
-                    # also consider higher builds (risky) after
-                    gt = sorted([a for a in all_cuda if cuda_build_ver(a["name"]) > cuda_ver], key=lambda a: cuda_build_ver(a["name"]))
+                    gt = sorted([a for a in all_cuda if cuda_build_ver(a["name"]) > cuda_ver], key=lambda a: (cuda_build_ver(a["name"]), 0 if not is_cudart(a["name"]) else 1))
                     for a in gt:
                         if a["name"] not in seen:
+                            seen.add(a["name"])
                             candidates.append(a)
                 else:
-                    candidates = all_cuda
+                    candidates = sorted(all_cuda, key=lambda a: (0 if not is_cudart(a["name"]) else 1))
 
                 for a in candidates:
                     bv = cuda_build_ver(a["name"])
@@ -344,6 +335,23 @@ def ensure_llama_server(binary_hint: str = "") -> str:
             "Especifica --llama-binary o instala llama-server manualmente."
         )
 
+    # Find companion cudart asset if we picked a cuda build (for runtime libs)
+    cudart_asset = None
+    if "cuda" in asset["name"].lower() and "cudart" not in asset["name"].lower():
+        # look for matching cudart in same release assets
+        for a in assets:
+            n = a["name"].lower()
+            if "cudart" in n and "cuda" in n and n.endswith(".tar.gz"):
+                # match same cuda version and arch
+                import re
+                v1 = re.search(r"cuda-(\d+\.\d+)", asset["name"].lower())
+                v2 = re.search(r"cuda-(\d+\.\d+)", n)
+                if v1 and v2 and v1.group(1) == v2.group(1) and ("x64" in n) == ("x64" in asset["name"].lower()):
+                    cudart_asset = a
+                    break
+        if cudart_asset:
+            print(f"[backend] También se usará cudart: {cudart_asset['name']}")
+
     # If Vulkan build selected, ensure Vulkan runtime is present
     if "vulkan" in asset["name"].lower():
         ensure_vulkan_runtime()
@@ -361,6 +369,26 @@ def ensure_llama_server(binary_hint: str = "") -> str:
     else:
         with tarfile.open(archive_path, "r:*") as t:
             t.extractall(extract_dir)
+
+    # Also extract cudart companion if present
+    if cudart_asset:
+        ca_path = bdir / cudart_asset["name"]
+        _download(cudart_asset["browser_download_url"], ca_path, desc=f"cudart {tag} ({cudart_asset['name']})")
+        print(f"[backend] Extrayendo {ca_path.name} ...")
+        ca_extract = bdir / f"llama-{tag}-cudart"
+        ca_extract.mkdir(parents=True, exist_ok=True)
+        if ca_path.name.endswith(".zip"):
+            with zipfile.ZipFile(ca_path, "r") as z:
+                z.extractall(ca_extract)
+        else:
+            with tarfile.open(ca_path, "r:*") as t:
+                t.extractall(ca_extract)
+        # copy cudart libs into main extract dir (so they end up next to llama-server)
+        for f in ca_extract.rglob("*"):
+            if f.is_file() and (".so" in f.name or f.suffix in (".dll", ".dylib")):
+                dest_f = extract_dir / f.name
+                if not dest_f.exists():
+                    shutil.copy2(f, dest_f)
 
     # find llama-server inside
     candidates = list(extract_dir.rglob(exe))
@@ -381,6 +409,14 @@ def ensure_llama_server(binary_hint: str = "") -> str:
             shutil.copy2(f, dst)
             if os.name != "nt":
                 dst.chmod(dst.stat().st_mode | stat.S_IEXEC)
+    # also copy any cudart/shared libs extracted at extract_dir root
+    for f in extract_dir.iterdir():
+        if f.is_file() and (".so" in f.name or f.suffix in (".dll",".dylib")):
+            dst = target_dir / f.name
+            if not dst.exists():
+                shutil.copy2(f, dst)
+                if os.name != "nt":
+                    dst.chmod(dst.stat().st_mode | stat.S_IEXEC)
     final = target_dir / src.name
     # also create/link standard name
     std = bdir / exe
