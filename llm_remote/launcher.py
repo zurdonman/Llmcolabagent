@@ -36,6 +36,7 @@ def run(cfg: Config):
     try:
         from . import backends
         backends.log_gpu_diagnostics()
+        backends.ensure_vulkan_runtime()
     except Exception as e:
         print(f"[launcher] No se pudo obtener diagnóstico GPU: {e}")
 

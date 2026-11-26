@@ -122,29 +122,63 @@ def log_gpu_diagnostics():
 
 
 def ensure_vulkan_runtime():
-    """Try to install Vulkan runtime on Linux if missing."""
+    """Try to install Vulkan runtime on Linux if missing, and ensure NVIDIA ICD exists."""
     if platform.system().lower() != "linux":
         return
-    import subprocess as _sp, shutil as _sh
-    # Check libvulkan
-    has_vulkan = bool(_sh.which("vulkaninfo")) or Path("/usr/lib/x86_64-linux-gnu/libvulkan.so.1").exists() or Path("/usr/lib64/libvulkan.so.1").exists()
-    if has_vulkan:
-        print("[backend] Vulkan runtime detectado.")
-        return
-    if not _sh.which("apt-get"):
-        print("[backend] No se encontró apt-get para instalar Vulkan runtime.")
-        return
-    print("[backend] Instalando Vulkan runtime (libvulkan1, mesa-vulkan-drivers)...")
-    try:
-        _sp.run(["apt-get", "update", "-qq"], check=False, capture_output=True, text=True, timeout=120)
-        r = _sp.run(["apt-get", "install", "-y", "-qq", "libvulkan1", "mesa-vulkan-drivers", "vulkan-tools"],
-                    check=False, capture_output=True, text=True, timeout=300)
-        if r.returncode != 0:
-            print(f"[backend] Aviso instalando Vulkan: {r.stderr[-500:]}")
+    import subprocess as _sp, shutil as _sh, json as _json, glob as _glob
+
+    def _has_nvidia_vulkan_icd():
+        for d in ["/usr/share/vulkan/icd.d", "/etc/vulkan/icd.d", "/usr/local/share/vulkan/icd.d"]:
+            p = Path(d)
+            if p.exists() and any("nvidia" in f.name.lower() for f in p.glob("*.json")):
+                return True
+        # also check ICD env
+        for k in ["VK_ICD_FILENAMES", "VK_DRIVER_FILES"]:
+            if os.environ.get(k):
+                return True
+        return False
+
+    has_libvulkan = Path("/usr/lib/x86_64-linux-gnu/libvulkan.so.1").exists() or Path("/usr/lib64/libvulkan.so.1").exists()
+    has_vulkaninfo = bool(_sh.which("vulkaninfo"))
+    has_icd = _has_nvidia_vulkan_icd()
+
+    if not has_libvulkan or not has_vulkaninfo:
+        if _sh.which("apt-get"):
+            print("[backend] Instalando Vulkan runtime (libvulkan1, vulkan-tools)...")
+            try:
+                _sp.run(["apt-get", "update", "-qq"], check=False, capture_output=True, text=True, timeout=120)
+                _sp.run(["apt-get", "install", "-y", "-qq", "libvulkan1", "vulkan-tools"],
+                        check=False, capture_output=True, text=True, timeout=300)
+            except Exception as e:
+                print(f"[backend] No se pudo instalar Vulkan runtime: {e}")
         else:
-            print("[backend] Vulkan runtime instalado.")
-    except Exception as e:
-        print(f"[backend] No se pudo instalar Vulkan runtime: {e}")
+            print("[backend] No se encontró apt-get para instalar Vulkan runtime.")
+
+    # Ensure NVIDIA Vulkan ICD exists (Colab sometimes missing it)
+    if not _has_nvidia_vulkan_icd() and _has_nvidia_gpu():
+        print("[backend] NVIDIA Vulkan ICD no encontrado; intentando crear...")
+        icd_dir = Path("/usr/share/vulkan/icd.d")
+        try:
+            icd_dir.mkdir(parents=True, exist_ok=True)
+            # Find nvidia lib
+            lib_candidates = _glob.glob("/usr/lib/x86_64-linux-gnu/libGLX_nvidia.so*") + \
+                             _glob.glob("/usr/lib64/libGLX_nvidia.so*") + \
+                             _glob.glob("/usr/lib/x86_64-linux-gnu/nvidia*/libGLX_nvidia.so*")
+            lib_path = "libGLX_nvidia.so.0"
+            for c in lib_candidates:
+                lib_path = c
+                break
+            icd = {"file_format_version": "1.0.0", "ICD": {"library_path": lib_path, "api_version": "1.3.0"}}
+            icd_file = icd_dir / "nvidia_icd.json"
+            icd_file.write_text(_json.dumps(icd), encoding="utf-8")
+            print(f"[backend] NVIDIA Vulkan ICD creado: {icd_file} -> {lib_path}")
+        except Exception as e:
+            print(f"[backend] No se pudo crear NVIDIA Vulkan ICD: {e}")
+
+    if _sh.which("vulkaninfo"):
+        print("[backend] Vulkan runtime listo.")
+    else:
+        print("[backend] Vulkan runtime instalado parcialmente (vulkaninfo no disponible).")
 
 
 def _detect_cuda_version() -> tuple[int, int] | None:

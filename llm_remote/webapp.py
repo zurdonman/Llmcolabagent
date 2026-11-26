@@ -145,10 +145,27 @@ def _start_backend_thread(state: AppState, req_cfg: dict):
         if not ok:
             raise RuntimeError("El backend no respondió a tiempo. Revisa logs/backend.log")
 
+        # Check if GPU offload happened
+        gpu_info = ""
+        try:
+            if state.log_path.exists():
+                logtxt = state.log_path.read_text(encoding="utf-8", errors="replace").lower()
+                if "offloaded" in logtxt and "gpu" in logtxt:
+                    import re as _re
+                    m = _re.search(r"offloaded\s+(\d+/\d+)\s+layers?\s+to\s+gpu", logtxt)
+                    gpu_info = f" | GPU: offloaded {m.group(1)} layers" if m else " | GPU: offload detectado"
+                elif "ggml_vulkan" in logtxt or "vulkan" in logtxt:
+                    gpu_info = " | Vulkan detectado en log"
+                elif "ggml_cuda" in logtxt or "cuda" in logtxt:
+                    gpu_info = " | CUDA detectado en log"
+                else:
+                    gpu_info = " | AVISO: no se detectó offload a GPU en logs (puede estar en CPU)"
+        except Exception:
+            pass
         with state.lock:
             state.status = "running"
             state.model_loaded = cfg.model
-            state.status_detail = "Modelo listo"
+            state.status_detail = "Modelo listo" + gpu_info
             state.download_progress = {"active": False, "percent": 100}
     except Exception as e:
         with state.lock:
